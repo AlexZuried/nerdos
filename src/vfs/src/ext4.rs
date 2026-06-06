@@ -576,3 +576,111 @@ impl FileSystem for Ext4Fs {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Inode Operations Implementation
+// ---------------------------------------------------------------------------
+
+/// Simple directory entry lookup in ext4
+fn ext4_lookup_dir(fs: &Ext4Fs, dir_ino: &Inode, name: &str) -> Result<Inode, VfsError> {
+    let sb = fs.sb.as_ref().ok_or(VfsError::EINVAL)?;
+    
+    // For now, return a stub implementation
+    // In a full implementation, this would:
+    // 1. Read the directory inode data
+    // 2. Parse directory entries
+    // 3. Find matching name
+    // 4. Return the corresponding inode
+    
+    // Stub: return error for now as full implementation requires block device access
+    let _ = sb;
+    let _ = dir_ino;
+    let _ = name;
+    
+    Err(VfsError::ENOENT)
+}
+
+/// Read data from an ext4 file
+fn ext4_read_file(fs: &Ext4Fs, inode: &Inode, buf: &mut [u8], offset: Off) -> Result<usize, VfsError> {
+    let sb = fs.sb.as_ref().ok_or(VfsError::EINVAL)?;
+    
+    // For now, return empty read
+    // Full implementation would:
+    // 1. Read inode structure
+    // 2. Follow extent tree or block pointers
+    // 3. Read data blocks
+    // 4. Copy to buffer
+    
+    let _ = sb;
+    let _ = inode;
+    let _ = buf;
+    let _ = offset;
+    
+    Ok(0)
+}
+
+/// Write data to an ext4 file
+fn ext4_write_file(fs: &Ext4Fs, inode: &Inode, buf: &[u8], offset: Off) -> Result<usize, VfsError> {
+    // Currently read-only support
+    let _ = fs;
+    let _ = inode;
+    let _ = buf;
+    let _ = offset;
+    
+    Err(VfsError::EROFS)
+}
+
+/// Read directory entries
+fn ext4_readdir(fs: &Ext4Fs, dir: &Inode, offset: Off, entries: &mut [Dirent]) -> Result<usize, VfsError> {
+    // For root directory, return . and ..
+    if dir.ino == 2 && offset == 0 {
+        if entries.len() >= 2 {
+            entries[0] = Dirent {
+                ino: 2,
+                offset: 0,
+                reclen: 0,
+                file_type: DT_DIR,
+                name: String::from("."),
+            };
+            entries[1] = Dirent {
+                ino: 2,
+                offset: 1,
+                reclen: 0,
+                file_type: DT_DIR,
+                name: String::from(".."),
+            };
+            return Ok(2);
+        }
+    }
+    
+    let _ = fs;
+    let _ = dir;
+    let _ = offset;
+    
+    Ok(0)
+}
+
+/// Create a directory (not supported in read-only mode)
+fn ext4_mkdir(fs: &Ext4Fs, dir: &Inode, name: &str, mode: Mode) -> Result<Inode, VfsError> {
+    let _ = fs;
+    let _ = dir;
+    let _ = name;
+    let _ = mode;
+    Err(VfsError::EROFS)
+}
+
+/// Remove a file (not supported in read-only mode)
+fn ext4_unlink(fs: &Ext4Fs, dir: &Inode, name: &str) -> Result<(), VfsError> {
+    let _ = fs;
+    let _ = dir;
+    let _ = name;
+    Err(VfsError::EROFS)
+}
+
+/// Remove a directory (not supported in read-only mode)
+fn ext4_rmdir(fs: &Ext4Fs, dir: &Inode, name: &str) -> Result<(), VfsError> {
+    let _ = fs;
+    let _ = dir;
+    let _ = name;
+    Err(VfsError::EROFS)
+}
