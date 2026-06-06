@@ -1,98 +1,97 @@
 # =============================================================================
-# BoundaryOS Trampoline - 32-bit to 64-bit Mode Switch
-# PHASE 2: Basic assembly boot stub, CPU detection (continued)
+# BoundaryOS Trampoline - Application Processor Startup
+# =============================================================================
+# DESIGN NOTE: This code is used for starting additional CPUs (APs) in SMP systems.
+# The BSP (Bootstrap Processor) runs boot.S, while APs start here.
+#
 # LAWS: Nothing is Hidden, Nothing is a Magic Incantation
-# MODULE SIZE: ~0.15k lines | budget: 5k lines of 100k total
-# DESIGN NOTE: Separate trampoline for AP startup and BSP fallback
-#              This code runs during SMP initialization or if main boot fails
 # =============================================================================
 
+.section .boot, "ax"
 .code32
-.section .trampoline, "ax"
+
 .globl trampoline_start
 .type trampoline_start, @function
 
 trampoline_start:
     # Disable interrupts
     cli
-
-    # Load temporary GDT for transition
+    
+    # Load temporary GDT (same as main GDT for simplicity)
     lgdt trampoline_gdt_desc
-
-    # Enable protected mode (set CR0.PE)
-    mov %cr0, %eax
-    or $1, %eax
-    mov %eax, %cr0
-
-    # Far jump to flush pipeline and load CS
-    ljmp $0x08, $trampoline_pm
-
-trampoline_pm:
-    # Set up segment registers
-    mov $0x10, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    mov %ax, %ss
-
+    
     # Enable PAE
-    mov %cr4, %eax
-    or $0x20, %eax
-    mov %eax, %cr4
-
-    # Load page table base (CR3) - set by caller
-    # eax should contain physical address of PML4
-    mov %edi, %cr3
-
-    # Enable long mode (EFER.LME)
-    mov $0xC0000080, %ecx
+    movl %cr4, %eax
+    orl $(1 << 5), %eax
+    movl %eax, %cr4
+    
+    # Load page tables (physical address passed by BSP)
+    movl trampoline_cr3_value, %eax
+    movl %eax, %cr3
+    
+    # Enable Long Mode via EFER
+    movl $0xC0000080, %ecx
     rdmsr
-    or $0x100, %eax
+    orl $(1 << 8), %eax
     wrmsr
-
-    # Enable paging (CR0.PG)
-    mov %cr0, %eax
-    or $0x80000000, %eax
-    mov %eax, %cr0
-
+    
+    # Enable Paging
+    movl %cr0, %eax
+    orl $(1 << 31), %eax
+    movl %eax, %cr0
+    
     # Far jump to 64-bit mode
-    ljmp $0x08, $trampoline_64
+    leal trampoline_64bit, %eax
+    pushl $0x08
+    pushl %eax
+    lretq
 
+# 64-bit entry for AP
 .code64
-trampoline_64:
-    # Set up segment registers for 64-bit
-    xor %ax, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    mov %ax, %ss
-
-    # Set up stack (passed in esi)
-    mov %esi, %rsp
-
-    # Jump to C/Rust entry point
-    call trampoline_entry_64
-
-    # Should never return
+trampoline_64bit:
+    # Clear segment registers
+    xorl %eax, %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %ss
+    movw %ax, %fs
+    movw %ax, %gs
+    
+    # Load AP stack (set by BSP)
+    movq trampoline_ap_stack, %rsp
+    
+    # Jump to AP initialization routine (set by BSP)
+    call *trampoline_ap_entry
+    
+    # Halt if return (should not happen)
     cli
-    hlt
-    jmp .
+1:  hlt
+    jmp 1b
 
-# Temporary GDT for transition
-.align 8
+# =============================================================================
+# Trampoline GDT (same as main GDT)
+# =============================================================================
+.align 16
 trampoline_gdt:
-    .quad 0                               # Null descriptor
-    .quad 0x00af9a000000ffff              # Code segment
-    .quad 0x00cf92000000ffff              # Data segment
+    .quad 0x0000000000000000
+    .quad 0x00AF9A000000FFFF
+    .quad 0x00CF92000000FFFF
 
 trampoline_gdt_desc:
-    .word 0x17                            # Limit (3 entries - 1)
-    .long trampoline_gdt                  # Base address
+    .word 23
+    .quad trampoline_gdt
 
+# =============================================================================
+# Variables set by BSP before releasing AP
+# =============================================================================
 .section .data
-.globl trampoline_ready
-trampoline_ready:
-    .long 0                               # Flag indicating trampoline is ready
+.align 8
 
+trampoline_cr3_value:
+    .long 0
+trampoline_ap_stack:
+    .quad 0
+trampoline_ap_entry:
+    .quad 0
+
+# MODULE SIZE: ~0.1k lines

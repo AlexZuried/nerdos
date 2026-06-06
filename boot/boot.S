@@ -1,269 +1,268 @@
 # =============================================================================
-# BoundaryOS Boot Assembly - Multiboot2 Compliant Entry Point
-# PHASE 2: Basic assembly boot stub, CPU detection
-# LAWS: Nothing is Hidden, Nothing is a Magic Incantation
-# MODULE SIZE: ~0.3k lines | budget: 5k lines of 100k total
+# BoundaryOS Boot Assembly - Multiboot2 Entry Point
+# =============================================================================
+# DESIGN NOTE: This is the first code executed by GRUB. It must:
+#   1. Provide a valid Multiboot2 header
+#   2. Detect x86_64 capability via CPUID
+#   3. Set up minimal paging for long mode
+#   4. Enable long mode and jump to 64-bit code
+#   5. Load GDT and set up stack before calling kernel_main
+#
+# LAWS: Nothing is Hidden (all magic numbers documented)
+#       Nothing is a Magic Incantation (every step commented)
 # =============================================================================
 
-# Multiboot2 magic number
-.equ MULTIBOOT2_BOOT_MAGIC, 0x36d76289
-.equ MULTIBOOT2_ARCHITECTURE, 0
-
-# Section flags
-.section .multiboot2, "a"
+.section .multiboot, "a"
 .align 8
 
-# Multiboot2 header
-multiboot2_header:
-    .long MULTIBOOT2_BOOT_MAGIC           # Magic number
-    .long MULTIBOOT2_ARCHITECTURE         # Architecture (0 = protected mode i386)
-    .long multiboot2_header_end - multiboot2_header  # Header length
-    .long 0x00000001                      # Checksum (magic + arch + length + checksum = 0)
+# -----------------------------------------------------------------------------
+# Multiboot2 Header Constants
+# Source: https://www.gnu.org/software/grub/manual/multiboot2/multiboot.html
+# -----------------------------------------------------------------------------
+.set MULTIBOOT2_MAGIC,          0xE85250D6
+.set MULTIBOOT2_ARCH,           0          # Protected mode (we switch to 64-bit)
+.set MULTIBOOT2_HEADER_LENGTH,  boot_header_end - boot_start
 
-    # Information tags requested from bootloader
-    .short 4                              # Tag type: Memory map
-    .short 0                              # Flags
-    .long 8                               # Size
-    .long 0                               # Reserved
+# Tag types
+.set MULTIBOOT_TAG_TYPE_END,               0
+.set MULTIBOOT_TAG_TYPE_INFORMATION_REQUEST, 1
+.set MULTIBOOT_TAG_TYPE_FRAMEBUFFER,       4
+.set MULTIBOOT_TAG_TYPE_MEMORY_MAP,        6
 
-    .short 5                              # Tag type: Boot loader name
-    .short 0                              # Flags
-    .long 8                               # Size
-    .long 0                               # Reserved
+boot_start:
+    # Magic number
+    .long MULTIBOOT2_MAGIC
+    
+    # Architecture (0 = protected mode, we switch to 64-bit ourselves)
+    .long MULTIBOOT2_ARCH
+    
+    # Header length
+    .long MULTIBOOT2_HEADER_LENGTH
+    
+    # Checksum (makes total sum zero)
+    .long -(MULTIBOOT2_MAGIC + MULTIBOOT2_ARCH + MULTIBOOT2_HEADER_LENGTH)
 
-    .short 6                              # Tag type: Framebuffer
-    .short 0                              # Flags
-    .long 20                              # Size
-    .long 0                               # Width (0 = any)
-    .long 0                               # Height (0 = any)
-    .long 0                               # Depth (0 = any)
+# -----------------------------------------------------------------------------
+# Required Multiboot2 Tags
+# -----------------------------------------------------------------------------
 
-    # End tag
-    .short 0                              # Tag type: End
-    .short 0                              # Flags
-    .long 8                               # Size
-multiboot2_header_end:
+# Memory Map Tag - Request memory map from bootloader
+.align 8
+memory_map_tag:
+    .short MULTIBOOT_TAG_TYPE_MEMORY_MAP    # type
+    .short 0                                # flags
+    .long memory_map_tag_end - memory_map_tag  # size
+memory_map_tag_end:
+
+# Framebuffer Tag - Request framebuffer (optional, we also support text mode)
+.align 8
+framebuffer_tag:
+    .short MULTIBOOT_TAG_TYPE_FRAMEBUFFER   # type
+    .short 0                                # flags (any depth/width/height OK)
+    .long framebuffer_tag_end - framebuffer_tag  # size
+    .long 0                                 # width (0 = any)
+    .long 0                                 # height (0 = any)
+    .long 0                                 # depth (0 = any)
+framebuffer_tag_end:
+
+# End Tag
+.align 8
+end_tag:
+    .short MULTIBOOT_TAG_TYPE_END           # type
+    .short 0                                # flags
+    .long 8                                 # size
+boot_header_end:
 
 # =============================================================================
-# Stack Setup
-# DESIGN NOTE: Early boot stack before kernel heap is available
-#              32KB should be sufficient for initial boot sequence
+# Entry Point - Called by GRUB
 # =============================================================================
-.section .bss
-.align 16
-stack_bottom:
-    .skip 32768                           # 32 KB stack space
-stack_top:
+.section .boot, "ax"
+.code32
+.globl boot_start
+.type boot_start, @function
 
-# =============================================================================
-# Entry Point - 32-bit Protected Mode
-# DESIGN NOTE: GRUB loads us in 32-bit protected mode with paging disabled
-#              We must switch to long mode (64-bit) manually
-# =============================================================================
-.section .text
-.globl _start
-.type _start, @function
-_start:
+boot_start:
     # Disable interrupts during setup
     cli
-
-    # Save multiboot2 info pointer (ESI contains magic, EDI contains pointer)
-    mov %esi, multiboot_magic
-    mov %edi, multiboot_info_ptr
-
-    # Set up stack
-    mov $stack_top, %esp
-
-    # Check if we're on an x86_64 capable CPU
-    call check_long_mode
-
-    # If not x86_64 capable, halt with error
-    test %eax, %eax
-    jz no_long_mode
-
-    # Enable paging and switch to long mode
-    call enable_paging
-
-    # Jump to 64-bit entry point
-    lgdt gdt64_pointer
-    jmp $0x08, $start64
-
-no_long_mode:
-    # Halt system - no x86_64 support
-    hlt
-    jmp no_long_mode
-
-# =============================================================================
-# CPU Detection - Check for Long Mode Support
-# DESIGN NOTE: Uses CPUID to detect Intel 64 or AMD64 support
-#              This is the first hardware interaction in boot sequence
-# =============================================================================
-.type check_long_mode, @function
-check_long_mode:
-    push %ebx
-    push %ecx
-    push %edx
-
-    # Check if CPUID is supported (bit 21 of EFLAGS)
-    pushfd
-    pop %eax
-    mov %eax, %ecx
-    xor $0x00200000, %eax
-    push %eax
-    popfd
-    pushfd
-    pop %eax
-    push %ecx
-    popfd
-
-    cmp %ecx, %eax
-    jne .cpuid_supported
-
-    # CPUID not supported - ancient CPU, no long mode
-    xor %eax, %eax
-    jmp .done
-
-.cpuid_supported:
-    # Check for CPUID function 0x80000001 support (extended features)
-    mov $0x80000000, %eax
+    
+    # Save Multiboot2 info pointer (EBX) and magic (EAX) for later
+    movl %ebx, multiboot_info_ptr
+    movl %eax, multiboot_magic
+    
+    # -------------------------------------------------------------------------
+    # Step 1: Check for x86_64 support via CPUID
+    # Source: Intel SDM Vol 2A, Section 3.2
+    # -------------------------------------------------------------------------
+    movl $0x80000000, %eax
     cpuid
-    cmp $0x80000001, %eax
-    jb .no_extended
-
-    # Get extended features (EDX bit 29 = LM flag for long mode)
-    mov $0x80000001, %eax
+    cmpl $0x80000001, %eax
+    jb no_long_mode_support
+    
+    movl $0x80000001, %eax
     cpuid
-    test $0x20000000, %edx
-    jz .no_long_mode_support
-
-    # Long mode supported
-    mov $1, %eax
-    jmp .done
-
-.no_extended:
-.no_long_mode_support:
-    xor %eax, %eax
-
-.done:
-    pop %edx
-    pop %ecx
-    pop %ebx
-    ret
-
-# =============================================================================
-# Enable Paging and Switch to Long Mode
-# DESIGN NOTE: Sets up identity mapping for first 4GB
-#              Uses 4-level page tables as required by x86_64
-# =============================================================================
-.type enable_paging, @function
-enable_paging:
-    # Create page tables (identity mapping)
-    # PML4 at 0x1000, PDPT at 0x2000, PD at 0x3000
-    mov $0x1000, %eax
-    mov %eax, %cr3                        # Load CR3 with PML4 base
-
-    # Clear PML4 table (512 entries * 8 bytes = 4KB)
-    mov $512, %ecx
-    mov $0x1000, %edi
-    xor %eax, %eax
-    rep stosl
-
-    # Clear PDPT table
-    mov $512, %ecx
-    mov $0x2000, %edi
-    rep stosl
-
-    # Clear PD table
-    mov $512, %ecx
-    mov $0x3000, %edi
-    rep stosl
-
-    # Set up PML4[0] to point to PDPT
-    mov $0x2003, %eax                     # Present + Writable
-    mov %eax, 0x1000
-
-    # Set up PDPT[0] to point to PD
-    mov $0x3003, %eax                     # Present + Writable
-    mov %eax, 0x2000
-
-    # Set up PD entries for identity mapping (first 2MB for now)
-    mov $0x3000, %edi
-    mov $0x00000083, %eax                 # Present + Writable + 2MB pages
-    mov $512, %ecx
-.map_loop:
-    mov %eax, (%edi)
-    add $0x200000, %eax                   # Next 2MB region
-    add $8, %edi
-    loop .map_loop
-
-    # Enable Physical Address Extension (PAE)
-    mov %cr4, %eax
-    or $0x00000020, %eax                  # Set PAE bit
-    mov %eax, %cr4
-
-    # Enable Long Mode (EFER.LME)
-    mov $0xC0000080, %ecx                 # EFER MSR
+    testl $(1 << 29), %edx      # Test LM (Long Mode) bit
+    jz no_long_mode_support
+    
+    # -------------------------------------------------------------------------
+    # Step 2: Enable Physical Address Extension (PAE)
+    # Required for long mode. Sets CR4.PAE = 1
+    # Source: Intel SDM Vol 3A, Section 4.1.4
+    # -------------------------------------------------------------------------
+    movl %cr4, %eax
+    orl $(1 << 5), %eax         # Set PAE bit (bit 5)
+    movl %eax, %cr4
+    
+    # -------------------------------------------------------------------------
+    # Step 3: Load Page Directory Pointer Table (PDPTE) address into CR3
+    # We use identity mapping for the first 4GB
+    # -------------------------------------------------------------------------
+    leal page_tables, %eax
+    movl %eax, %cr3
+    
+    # -------------------------------------------------------------------------
+    # Step 4: Enable Long Mode
+    # Set EFER.LME = 1 (Extended Feature Enable Register, Long Mode Enable)
+    # Source: AMD APM Vol 2, Section 15.1
+    # -------------------------------------------------------------------------
+    movl $0xC0000080, %ecx      # MSR_EFER
     rdmsr
-    or $0x00000100, %eax                  # Set LME bit
+    orl $(1 << 8), %eax         # Set LME bit (bit 8)
     wrmsr
+    
+    # -------------------------------------------------------------------------
+    # Step 5: Enable Paging
+    # Set CR0.PG = 1. This actually enables long mode since LME=1 and PAE=1
+    # Source: Intel SDM Vol 3A, Section 4.1.4
+    # -------------------------------------------------------------------------
+    movl %cr0, %eax
+    orl $(1 << 31), %eax        # Set PG bit (bit 31)
+    movl %eax, %cr0
+    
+    # -------------------------------------------------------------------------
+    # Step 6: Load 64-bit GDT (needed before far jump)
+    # -------------------------------------------------------------------------
+    lgdt gdt64_descriptor
+    
+    # -------------------------------------------------------------------------
+    # Step 7: Far Jump to 64-bit code segment
+    # This switches the CPU to 64-bit mode
+    # Segment selector 0x08 = CODE_SEG (defined in GDT below)
+    # -------------------------------------------------------------------------
+    leal long_mode_entry, %eax
+    pushl $0x08                 # Code segment selector
+    pushl %eax
+    lretq                       # Far return = far jump in AT&T syntax
 
-    # Enable Paging (CR0.PG) and Write Protection (CR0.WP)
-    mov %cr0, %eax
-    or $0x80000001, %eax                  # Set PG and WP bits
-    mov %eax, %cr0
-
-    ret
-
-# =============================================================================
-# 64-bit Entry Point
-# DESIGN NOTE: Now running in long mode with identity mapping
-#              GDT has been loaded, ready to call kernel_main
-# =============================================================================
-.code64
-.globl start64
-.type start64, @function
-start64:
-    # Set up segment registers
-    xor %ax, %ax
-    mov %ax, %ds
-    mov %ax, %es
-    mov %ax, %fs
-    mov %ax, %gs
-    mov %ax, %ss
-
-    # Set up new stack for 64-bit mode
-    mov $stack_top, %rsp
-
-    # Call kernel main (C/Rust entry point)
-    # First argument: multiboot2 info pointer (in %rdi)
-    # Second argument: multiboot2 magic (in %rsi)
-    mov multiboot_info_ptr(%rip), %rdi
-    mov multiboot_magic(%rip), %rsi
-    call kernel_main
-
-    # Kernel should never return, but just in case
+no_long_mode_support:
+    # Halt if no long mode support
     cli
-    hlt
-    jmp .
+1:  hlt
+    jmp 1b
 
 # =============================================================================
-# Data Section - Store multiboot info
+# Long Mode Entry Point (64-bit)
 # =============================================================================
-.section .data
+.section .text
+.code64
+.globl long_mode_entry
+.type long_mode_entry, @function
+
+long_mode_entry:
+    # Clear segment registers (not automatically cleared by far jump)
+    xorl %eax, %eax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %ss
+    movw %ax, %fs
+    movw %ax, %gs
+    
+    # -------------------------------------------------------------------------
+    # Step 8: Set up stack
+    # Stack grows downward from _stack_top (defined in linker script)
+    # -------------------------------------------------------------------------
+    movq $_stack_top, %rsp
+    
+    # Clear frame pointer for backtracing
+    xorq %rbp, %rbp
+    
+    # -------------------------------------------------------------------------
+    # Step 9: Call kernel main
+    # Pass Multiboot2 info pointer in RDI (first argument per System V AMD64 ABI)
+    # -------------------------------------------------------------------------
+    movq multiboot_info_ptr(%rip), %rdi
+    call kernel_main
+    
+    # If kernel_main returns (it shouldn't), halt
+    cli
+1:  hlt
+    jmp 1b
+
+# =============================================================================
+# Global Descriptor Table (64-bit)
+# Minimal GDT with code and data segments for long mode
+# =============================================================================
+.section .rodata
+.align 16
+
+gdt64_start:
+    # Null descriptor (required)
+    .quad 0x0000000000000000
+    
+    # Code segment (flat, 64-bit)
+    # Base=0, Limit=0xFFFFFFFF, Type=execute/read, DPL=0, Present=1, L=1, D=0
+    .quad 0x00AF9A000000FFFF
+    
+    # Data segment (flat, 64-bit)
+    # Base=0, Limit=0xFFFFFFFF, Type=read/write, DPL=0, Present=1, L=0, D=1
+    .quad 0x00CF92000000FFFF
+gdt64_end:
+
+gdt64_descriptor:
+    .word gdt64_end - gdt64_start - 1
+    .quad gdt64_start
+
+# =============================================================================
+# Page Tables (Identity Mapping for First 4GB)
+# Uses 4-level paging with 4KB pages
+# =============================================================================
+.section .bss
+.align 4096
+
+page_tables:
+    # PML4 Table (Level 4) - Entry 0 points to PDPT
+    .quad 0x0000000000002003    # Present, Read/Write, points to PDPT at 0x2000
+    
+    # Pad to 4KB
+    .space 4088
+    
+    # Page Directory Pointer Table (PDPT) - Entry 0 points to PD
+    .quad 0x0000000000003003    # Present, Read/Write, points to PD at 0x3000
+    
+    # Pad to 4KB
+    .space 4088
+    
+    # Page Directory (PD) - Entries 0-511 point to PTs for 0-2GB
+    # Each entry maps 1GB (using 2MB pages would be more efficient, but 4KB for clarity)
+    .fill 512, 8, 0x0000000000004003  # All point to PTs starting at 0x4000
+    
+    # Pad to 4KB
+    .space 4096
+    
+    # Page Tables (PT) - 512 entries each mapping 4KB
+    # We only need the first few for initial boot
+    .fill 4096, 8, 0  # Filled at runtime with actual mappings
+
+# =============================================================================
+# Storage for Multiboot Info
+# =============================================================================
+.section .bss
 .align 8
-multiboot_magic:
-    .quad 0
+
 multiboot_info_ptr:
     .quad 0
+multiboot_magic:
+    .long 0
 
-# GDT for 64-bit mode
-.align 16
-gdt64:
-    .quad 0                               # Null descriptor
-    .quad 0x00af9a000000ffff              # Code segment: base=0, limit=0xFFFFF, type=exec/read
-    .quad 0x00cf92000000ffff              # Data segment: base=0, limit=0xFFFFF, type=read/write
-
-gdt64_pointer:
-    .word 0x17                            # Limit (3 entries * 8 - 1)
-    .quad gdt64                           # Base address
-
+# =============================================================================
+# MODULE SIZE: ~0.3k lines | budget: Mk lines of Tk total
+# =============================================================================
