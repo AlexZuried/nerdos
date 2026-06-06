@@ -1,1 +1,31 @@
-Nothing should be ignored based on the provided file changes. The only file added is `phase.md`, which appears to be a markdown document and should not be ignored.
+```
+# Compiled and build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+*.exe
+*.out
+build/
+target/
+
+# Dependencies
+.cargo/
+Cargo.lock
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Rust-specific
+**/*.rs.bk
+```
