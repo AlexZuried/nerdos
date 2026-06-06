@@ -1,0 +1,22 @@
+# =============================================================================
+# BoundaryOS Rust Toolchain Configuration
+# PHASE 2: Basic assembly boot stub, CPU detection (continued)
+# LAWS: Nothing is Hidden, Nothing is a Magic Incantation
+# DESIGN NOTE: Pinned nightly toolchain for reproducible builds
+#              Required components for bare-metal development
+# =============================================================================
+
+[toolchain]
+channel = "nightly-2024-01-15"
+components = [
+    "rust-src",           # Required for no_std compilation
+    "llvm-tools-preview", # For llvm-objcopy, llvm-nm, etc.
+    "rustfmt",            # Code formatting
+    "clippy",             # Linting
+]
+targets = [
+    "x86_64-unknown-none",    # Primary bare-metal target
+    "x86_64-unknown-uefi",    # UEFI boot support (future)
+]
+profile = "minimal"
+

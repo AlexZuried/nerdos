@@ -2,19 +2,14 @@
 # Compiled and build artifacts
 *.o
 *.obj
-*.a
-*.lib
-*.dll
-*.so
-*.dylib
-*.exe
 *.out
 build/
-target/
+dist/
 
 # Dependencies
+target/
 .cargo/
-Cargo.lock
+.cargo-lock
 
 # Logs and temp files
 *.log
@@ -23,9 +18,7 @@ Cargo.lock
 # Editors
 .vscode/
 .idea/
-*.swp
-*.swo
 
 # Rust-specific
-**/*.rs.bk
+Cargo.lock
 ```
