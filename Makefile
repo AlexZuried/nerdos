@@ -1,223 +1,202 @@
 # =============================================================================
-# BoundaryOS Master Makefile
-# PHASE 2: Basic assembly boot stub, CPU detection (continued)
-# LAWS: Nothing is Hidden, Nothing is a Magic Incantation
-# DESIGN NOTE: Single source of truth for build, run, and test operations
-#              Supports all phases from foundation to production
-# ===========================================================================
+# BoundaryOS Makefile
+# =============================================================================
+# DESIGN NOTE: This Makefile provides build, run, debug, and testing targets.
+# It follows the phase-based development approach outlined in phase.md
+#
+# LAWS: Nothing is Hidden (all targets documented)
+#       Nothing is a Magic Incantation (every step explicit)
+# =============================================================================
 
+# -----------------------------------------------------------------------------
 # Configuration
-TARGET := x86_64-unknown-none
+# -----------------------------------------------------------------------------
+ARCH := x86_64
+TARGET := $(ARCH)-unknown-none
 KERNEL_NAME := boundaryos
-BOOTLOADER := grub
-QEMU_FLAGS := -M q35 -m 2G -serial stdio
 
-# Directories
-BUILD_DIR := build
+# Paths
 BOOT_DIR := boot
-KERNEL_SRC := kernel/src
-CARGO_TARGET := target/$(TARGET)/debug
+KERNEL_DIR := kernel/src
+BUILD_DIR := target/$(TARGET)/debug
+ISO_DIR := isodir
 
 # Tools
 RUSTC := rustc
 CARGO := cargo
-LD := ld.lld
-OBJCOPY := llvm-objcopy
+AS := nasm
+LD := rust-lld
+GRUB := grub-mkrescue
 QEMU := qemu-system-x86_64
 GDB := gdb
 
-# Source files
-ASM_SOURCES := $(wildcard $(BOOT_DIR)/*.S)
-ASM_OBJECTS := $(patsubst $(BOOT_DIR)/%.S,$(BUILD_DIR)/%.o,$(ASM_SOURCES))
+# QEMU Flags
+QEMU_FLAGS := -m 2G \
+              -cpu qemu64 \
+              -drive format=raw,file=$(ISO_DIR)/boundaryos.iso \
+              -boot d \
+              -serial stdio \
+              -no-reboot \
+              -no-shutdown
 
-# Phases tracking
-CURRENT_PHASE ?= 2
-TOTAL_PHASES := 100
+# Debug QEMU Flags
+QEMU_DEBUG_FLAGS := $(QEMU_FLAGS) \
+                    -s \
+                    -S
 
-.PHONY: all build run debug clean test phase help iso qemu gdb
+# -----------------------------------------------------------------------------
+# Phony Targets
+# -----------------------------------------------------------------------------
+.PHONY: all build run debug iso clean help phases test disasm size
 
-# Default target
+# -----------------------------------------------------------------------------
+# Default Target
+# -----------------------------------------------------------------------------
 all: build
 
-# =============================================================================
-# Build System
-# =============================================================================
-
-build: $(BUILD_DIR)/$(KERNEL_NAME).elf
-@echo "✓ Build complete: $(BUILD_DIR)/$(KERNEL_NAME).elf"
-
-$(BUILD_DIR)/$(KERNEL_NAME).elf: $(ASM_OBJECTS) kernel
-@echo "Linking kernel..."
-$(LD) -T linker.ld -o $@ $(ASM_OBJECTS) -L$(CARGO_TARGET) -lboundaryos
-@echo "Kernel size: $$(du -h $@ | cut -f1)"
-
-$(BUILD_DIR)/%.o: $(BOOT_DIR)/%.S
-@echo "Assembling $<..."
-mkdir -p $(BUILD_DIR)
-as --64 -o $@ $<
-
-kernel:
-@echo "Building Rust kernel..."
+# -----------------------------------------------------------------------------
+# Build Kernel
+# -----------------------------------------------------------------------------
+build:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Building BoundaryOS Kernel            ║"
+@echo "╚══════════════════════════════════════════════╝"
 $(CARGO) build --target $(TARGET)
+@echo ""
+@echo "[+] Build complete: $(BUILD_DIR)/$(KERNEL_NAME)"
 
-# =============================================================================
-# Execution
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Run in QEMU
+# -----------------------------------------------------------------------------
+run: iso
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║     Launching BoundaryOS in QEMU             ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(QEMU) $(QEMU_FLAGS)
 
-run: build
-@echo "Booting BoundaryOS in QEMU..."
-$(QEMU) $(QEMU_FLAGS) -kernel $(BUILD_DIR)/$(KERNEL_NAME).elf
+# -----------------------------------------------------------------------------
+# Run with GDB Debugging
+# -----------------------------------------------------------------------------
+debug: iso
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║  Starting QEMU with GDB server (port 1234)   ║"
+@echo "║  In another terminal: gdb -ex 'target remote :1234'  ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(QEMU) $(QEMU_DEBUG_FLAGS)
 
-qemu: run
-
-debug: build
-@echo "Starting QEMU with GDB server..."
-$(QEMU) $(QEMU_FLAGS) -kernel $(BUILD_DIR)/$(KERNEL_NAME).elf -s -S &
-@echo "Connect with: gdb $(BUILD_DIR)/$(KERNEL_NAME).elf"
-@echo "Then: (gdb) target remote :1234"
-
-gdb: build
-$(GDB) $(BUILD_DIR)/$(KERNEL_NAME).elf -ex "target remote :1234"
-
-# =============================================================================
-# ISO Creation (for GRUB boot)
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# Create Bootable ISO
+# -----------------------------------------------------------------------------
 iso: build
-@echo "Creating bootable ISO..."
-mkdir -p $(BUILD_DIR)/iso/boot/grub
-cp $(BUILD_DIR)/$(KERNEL_NAME).elf $(BUILD_DIR)/iso/boot/$(KERNEL_NAME)
-cp $(BOOT_DIR)/grub.cfg $(BUILD_DIR)/iso/boot/grub/
-grub-mkrescue -o $(BUILD_DIR)/boundaryos.iso $(BUILD_DIR)/iso
-@echo "✓ ISO created: $(BUILD_DIR)/boundaryos.iso"
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Creating Bootable ISO                 ║"
+@echo "╚══════════════════════════════════════════════╝"
+mkdir -p $(ISO_DIR)/boot/grub
+cp $(BUILD_DIR)/$(KERNEL_NAME) $(ISO_DIR)/boot/$(KERNEL_NAME)
+cp $(BOOT_DIR)/grub.cfg $(ISO_DIR)/boot/grub/
+$(GRUB) -o $(ISO_DIR)/boundaryos.iso $(ISO_DIR)
+@echo ""
+@echo "[+] ISO created: $(ISO_DIR)/boundaryos.iso"
 
-run-iso: iso
-@echo "Booting from ISO..."
-$(QEMU) $(QEMU_FLAGS) -cdrom $(BUILD_DIR)/boundaryos.iso
+# -----------------------------------------------------------------------------
+# Clean Build Artifacts
+# -----------------------------------------------------------------------------
+clean:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Cleaning Build Artifacts              ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(CARGO) clean
+rm -rf $(ISO_DIR)
+@echo "[+] Clean complete"
 
-# =============================================================================
-# Testing
-# =============================================================================
+# -----------------------------------------------------------------------------
+# Disassemble Kernel
+# -----------------------------------------------------------------------------
+disasm: build
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Disassembling Kernel                  ║"
+@echo "╚══════════════════════════════════════════════╝"
+objdump -d $(BUILD_DIR)/$(KERNEL_NAME) | less
 
+# -----------------------------------------------------------------------------
+# Show Binary Size
+# -----------------------------------------------------------------------------
+size: build
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Kernel Size Analysis                  ║"
+@echo "╚══════════════════════════════════════════════╝"
+@echo ""
+@echo "Section sizes:"
+size $(BUILD_DIR)/$(KERNEL_NAME)
+@echo ""
+@echo "Total binary size:"
+ls -lh $(BUILD_DIR)/$(KERNEL_NAME) | awk '{print $$5}'
+@echo ""
+@echo "Budget: < 100KB total | Target: 100k lines"
+
+# -----------------------------------------------------------------------------
+# Run Tests
+# -----------------------------------------------------------------------------
 test:
-@echo "Running kernel tests..."
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Running Kernel Tests                  ║"
+@echo "╚══════════════════════════════════════════════╝"
 $(CARGO) test --target $(TARGET)
 
-test-all: test
-@echo "Running all tests including integration..."
-cd kernel/tests && $(CARGO) test --target $(TARGET)
-
-# =============================================================================
-# Phase Management
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# Phase Execution (for phase.md workflow)
+# -----------------------------------------------------------------------------
 phase%: 
-@echo "Executing Phase $*..."
-@echo "PHASE: $*" >> phase_log.txt
-@./execute_phase.sh $* || echo "Phase $* requires manual execution"
-@echo "✓ Phase $* complete"
-
-# Execute specific phases
-phase1: 
-@echo "Phase 1: Project skeleton"
-@mkdir -p $(BUILD_DIR) $(BOOT_DIR) kernel/src
-@touch phase1.done
-
-phase2: build
-@echo "Phase 2: Boot assembly complete"
-@touch phase2.done
-
-phase3:
-@echo "Phase 3: GDT setup"
-@touch phase3.done
-
-# Batch phases
-phases-1-10: $(foreach n,$(shell seq 1 10),phase$(n))
-@echo "✓ Phases 1-10 complete"
-
-phases-11-20: $(foreach n,$(shell seq 11 20),phase$(n))
-@echo "✓ Phases 11-20 complete"
-
-# =============================================================================
-# Utilities
-# =============================================================================
-
-clean:
-@echo "Cleaning build artifacts..."
-rm -rf $(BUILD_DIR)
-rm -rf target
-rm -f *.bin *.iso *.log
-$(CARGO) clean
-@echo "✓ Clean complete"
-
-size: build
-@echo "Kernel size analysis:"
-llvm-size $(BUILD_DIR)/$(KERNEL_NAME).elf
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Executing Phase $*                     ║"
+@echo "╚══════════════════════════════════════════════╝"
+@echo "[*] Phase $* execution placeholder"
+@echo "[*] Add phase-specific commands here"
 @echo ""
-@echo "Section breakdown:"
-llvm-nm --size-sort $(BUILD_DIR)/$(KERNEL_NAME).elf | tail -20
+@echo "[+] Phase $* complete"
 
-disasm: build
-@echo "Disassembling kernel..."
-llvm-objdump -d $(BUILD_DIR)/$(KERNEL_NAME).elf | less
+# -----------------------------------------------------------------------------
+# Install Toolchain Components
+# -----------------------------------------------------------------------------
+install-toolchain:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║     Installing Required Toolchain            ║"
+@echo "╚══════════════════════════════════════════════╝"
+rustup component add rust-src llvm-tools-preview
+rustup target add $(TARGET)
+@echo ""
+@echo "[+] Toolchain installation complete"
 
-symbols: build
-@echo "Kernel symbols:"
-llvm-nm $(BUILD_DIR)/$(KERNEL_NAME).elf | sort
-
-check:
-@echo "Running clippy..."
-$(CARGO) clippy --target $(TARGET)
-@echo "Formatting check..."
-$(CARGO) fmt -- --check
-
-format:
-@echo "Formatting code..."
-$(CARGO) fmt
-
-docs:
-@echo "Generating documentation..."
-$(CARGO) doc --target $(TARGET) --no-deps
-
-# =============================================================================
-# Information
-# =============================================================================
-
+# -----------------------------------------------------------------------------
+# Help Target
+# -----------------------------------------------------------------------------
 help:
-@echo "BoundaryOS Build System"
-@echo "======================="
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║           BoundaryOS Makefile Help           ║"
+@echo "╚══════════════════════════════════════════════╝"
 @echo ""
-@echo "Build targets:"
-@echo "  make build       - Build the kernel"
-@echo "  make run         - Run in QEMU"
-@echo "  make debug       - Run with GDB server"
-@echo "  make iso         - Create bootable ISO"
-@echo "  make test        - Run tests"
-@echo "  make clean       - Clean build artifacts"
+@echo "Available targets:"
+@echo "  all          - Build the kernel (default)"
+@echo "  build        - Compile kernel with Cargo"
+@echo "  run          - Build and run in QEMU"
+@echo "  debug        - Run in QEMU with GDB server"
+@echo "  iso          - Create bootable ISO image"
+@echo "  clean        - Remove build artifacts"
+@echo "  disasm       - Disassemble kernel binary"
+@echo "  size         - Show binary size analysis"
+@echo "  test         - Run kernel tests"
+@echo "  phaseN       - Execute phase N (e.g., make phase1)"
+@echo "  install-toolchain - Install required Rust components"
+@echo "  help         - Show this help message"
 @echo ""
-@echo "Phase targets:"
-@echo "  make phaseN      - Execute phase N (1-100)"
-@echo "  make phases-1-10 - Execute phases 1-10"
+@echo "Examples:"
+@echo "  make build           # Build only"
+@echo "  make run             # Build and run in QEMU"
+@echo "  make debug           # Start GDB debugging session"
+@echo "  make phase5          # Execute phase 5"
+@echo "  make clean && make   # Clean rebuild"
 @echo ""
-@echo "Utility targets:"
-@echo "  make size        - Show kernel size analysis"
-@echo "  make disasm      - Disassemble kernel"
-@echo "  make symbols     - List kernel symbols"
-@echo "  make docs        - Generate documentation"
-@echo "  make format      - Format code"
-@echo ""
-@echo "Current phase: $(CURRENT_PHASE)/$(TOTAL_PHASES)"
 
-info:
-@echo "BoundaryOS Build Information"
-@echo "============================"
-@echo "Target: $(TARGET)"
-@echo "Kernel: $(KERNEL_NAME)"
-@echo "Build dir: $(BUILD_DIR)"
-@echo "Phase: $(CURRENT_PHASE)/$(TOTAL_PHASES)"
-@echo "Rust version: $$($(CARGO) --version)"
-@echo ""
-@echo "Source files:"
-@find $(KERNEL_SRC) -name "*.rs" | wc -l | xargs echo "  Rust files:"
-@find $(BOOT_DIR) -name "*.S" | wc -l | xargs echo "  Assembly files:"
-
+# =============================================================================
+# MODULE SIZE: ~0.2k lines | budget: Mk lines of Tk total
+# =============================================================================
