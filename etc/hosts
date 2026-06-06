@@ -1,0 +1,14 @@
+# NerdOS hosts file
+# Format: <IP_address> <hostname> [aliases...]
+
+# Loopback
+127.0.0.1   localhost.localdomain   localhost
+::1         localhost.localdomain   localhost ip6-localhost ip6-loopback
+
+# Local machine (set during boot from /etc/hostname)
+# 127.0.1.1   nerdos.localdomain   nerdos
+
+# Common development hosts
+# 192.168.1.1    router.local
+# 192.168.1.100  dev.local
+# 192.168.1.101  build.local

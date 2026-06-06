@@ -1,0 +1,21 @@
+[package]
+name = "kernel_core"
+version = "0.1.0"
+edition = "2024"
+authors = ["NerdOS Contributors"]
+description = "Core kernel for NerdOS - x86_64 operating system written in Rust"
+license = "MIT"
+
+[dependencies]
+bitflags = "2.4"
+bit_field = "0.10"
+volatile = "0.5"
+spin = "0.9"
+multiboot2 = "0.20"
+
+[dependencies.lazy_static]
+version = "1.4"
+features = ["spin_no_std"]
+
+[lib]
+crate-type = ["staticlib"]

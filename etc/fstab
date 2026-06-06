@@ -1,0 +1,26 @@
+# NerdOS File System Table
+# Format: <device> <mountpoint> <fstype> <options> <dump> <pass>
+#
+# Device can be specified by:
+#   - UUID (UUID=xxx)
+#   - Label (LABEL=xxx)
+#   - Device path (/dev/sda1)
+#   - PARTUUID (PARTUUID=xxx)
+
+# Root filesystem
+# UUID=xxxx-xxxx / ext4 rw,relatime 0 1
+
+# Boot partition (if separate)
+# UUID=xxxx-xxxx /boot fat32 defaults 0 2
+
+# ProcFS (always mounted)
+proc /proc proc defaults 0 0
+
+# TmpFS for /tmp
+tmpfs /tmp tmpfs size=256M,mode=1777 0 0
+
+# TmpFS for /var/run (runtime state)
+tmpfs /var/run tmpfs size=32M,mode=0755 0 0
+
+# TmpFS for /var/lock
+tmpfs /var/lock tmpfs size=8M,mode=1777 0 0

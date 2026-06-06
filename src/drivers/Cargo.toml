@@ -1,0 +1,16 @@
+[package]
+name = "drivers"
+version = "0.1.0"
+edition = "2024"
+authors = ["NerdOS Contributors"]
+description = "Hardware drivers for NerdOS - keyboard, VGA, serial, AHCI, e1000"
+license = "MIT"
+
+[dependencies]
+kernel_core = { path = "../kernel_core" }
+spin = "0.9"
+bitflags = "2.4"
+volatile = "0.5"
+
+[lib]
+crate-type = ["staticlib"]

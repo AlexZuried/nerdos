@@ -1,0 +1,22 @@
+[workspace]
+members = [
+    "src/bootloader",
+    "src/kernel_core",
+    "src/drivers",
+    "src/vfs",
+    "src/net",
+    "src/pkg",
+    "src/nerdshell",
+]
+resolver = "2"
+
+[profile.dev]
+opt-level = 1
+debug = true
+overflow-checks = true
+
+[profile.release]
+opt-level = 3
+debug = false
+overflow-checks = false
+lto = true

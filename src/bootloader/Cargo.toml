@@ -1,0 +1,12 @@
+[package]
+name = "bootloader"
+version = "0.1.0"
+edition = "2024"
+authors = ["NerdOS Contributors"]
+description = "Multiboot2 bootloader stub for NerdOS"
+license = "MIT"
+
+[dependencies]
+
+# This crate is a no_std binary that creates the boot.o object file
+# The actual boot code is in assembly (boot.asm)

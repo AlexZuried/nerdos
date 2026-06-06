@@ -1,0 +1,66 @@
+# NerdOS Package Sources
+# Format: TOML
+#
+# Supported source types:
+#   - "debian" : Debian/Ubuntu repositories
+#   - "arch"   : Arch Linux repositories
+#   - "git"    : Git repositories (build from source)
+#   - "local"  : Local directories
+
+# Debian repositories
+[[source]]
+type = "debian"
+name = "debian-bookworm-main"
+url = "http://deb.debian.org/debian"
+suite = "bookworm"
+components = ["main"]
+priority = 500
+
+[[source]]
+type = "debian"
+name = "debian-bookworm-contrib"
+url = "http://deb.debian.org/debian"
+suite = "bookworm"
+components = ["contrib"]
+priority = 400
+
+[[source]]
+type = "debian"
+name = "debian-bookworm-nonfree"
+url = "http://deb.debian.org/debian"
+suite = "bookworm"
+components = ["non-free"]
+priority = 300
+
+# Arch repositories
+[[source]]
+type = "arch"
+name = "arch-core"
+url = "https://mirror.archlinux.org/core/os/x86_64"
+priority = 500
+
+[[source]]
+type = "arch"
+name = "arch-extra"
+url = "https://mirror.archlinux.org/extra/os/x86_64"
+priority = 500
+
+# NerdOS core (git)
+[[source]]
+type = "git"
+name = "nerdos-core"
+url = "https://github.com/nerdos/core"
+branch = "main"
+build_command = "cargo build --release"
+install_command = "cp target/release/* /usr/bin/"
+priority = 1000
+
+# User's personal git sources
+# Add your own git repositories here:
+# [[source]]
+# type = "git"
+# name = "my-project"
+# url = "https://github.com/username/project"
+# branch = "main"
+# build_command = "make"
+# install_command = "make install PREFIX=/usr"

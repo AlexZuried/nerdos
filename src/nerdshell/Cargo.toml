@@ -1,0 +1,16 @@
+[package]
+name = "nerdshell"
+version = "0.1.0"
+edition = "2024"
+authors = ["NerdOS Contributors"]
+description = "Interactive shell for NerdOS"
+license = "MIT"
+
+[dependencies]
+kernel_core = { path = "../kernel_core" }
+vfs = { path = "../vfs" }
+net = { path = "../net" }
+pkg = { path = "../pkg" }
+
+[lib]
+crate-type = ["staticlib"]

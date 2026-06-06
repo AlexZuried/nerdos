@@ -1,0 +1,14 @@
+[package]
+name = "pkg"
+version = "0.1.0"
+edition = "2024"
+authors = ["NerdOS Contributors"]
+description = "nerdpkg - Package manager for NerdOS supporting .deb, .pkg.tar.zst, and git"
+license = "MIT"
+
+[dependencies]
+kernel_core = { path = "../kernel_core" }
+vfs = { path = "../vfs" }
+
+[lib]
+crate-type = ["staticlib"]

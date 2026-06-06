@@ -1,0 +1,80 @@
+# NerdOS Package Manager Configuration
+
+[general]
+# Target architecture (auto-detected from uname -m if not set)
+# Valid values: "x86_64", "i686", "aarch64"
+architecture = "x86_64"
+
+# Installation prefix (where packages are installed)
+prefix = "/usr"
+
+# Cache directory for downloaded packages
+cache_dir = "/var/cache/nerdpkg"
+
+# Package database directory
+db_dir = "/var/lib/nerdpkg"
+
+# Log file location
+log_file = "/var/log/nerdpkg.log"
+
+[behavior]
+# Confirm before installing/removing packages
+confirm = true
+
+# Keep downloaded packages in cache after installation
+keep_cache = false
+
+# Automatically remove orphaned dependencies
+remove_orphans = true
+
+# Verify package signatures
+verify_signatures = true
+
+# Allow installation of unsigned packages (for development)
+allow_unsigned = false
+
+[git]
+# Default clone depth (0 = full clone, 1 = shallow clone)
+clone_depth = 1
+
+# Number of parallel build jobs
+build_jobs = 4
+
+# Default build command if not specified in source
+build_command = "cargo build --release"
+
+# Default install command if not specified in source
+install_command = "cp -r target/release/* /usr/bin/"
+
+# Default branch to checkout
+default_branch = "main"
+
+[debian]
+# dpkg compatibility level
+dpkg_compat = 12
+
+# Extract .deb control scripts (preinst, postinst, prerm, postrm)
+extract_scripts = true
+
+# Execute control scripts during install/remove
+execute_scripts = true
+
+[arch]
+# pacman database path (for reading installed packages)
+pacman_db = "/var/lib/pacman"
+
+# Extract .INSTALL scripts
+extract_install_scripts = true
+
+# Execute .INSTALL scripts during install/remove
+execute_install_scripts = true
+
+[network]
+# HTTP timeout in seconds
+timeout = 30
+
+# Maximum retries for failed downloads
+max_retries = 3
+
+# Use HTTP instead of HTTPS (not recommended)
+use_http = false
