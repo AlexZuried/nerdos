@@ -1,234 +1,202 @@
-# NerdOS Makefile
-# 
-# Targets:
-#   make build    - Build the kernel binary
-#   make run      - Run NerdOS in QEMU
-#   make iso      - Build bootable ISO image
-#   make clean    - Remove build artifacts
-#   make debug    - Run with GDB debugging
-#   make format   - Format Rust code
-#   make lint     - Run clippy linter
+# =============================================================================
+# BoundaryOS Makefile
+# =============================================================================
+# DESIGN NOTE: This Makefile provides build, run, debug, and testing targets.
+# It follows the phase-based development approach outlined in phase.md
 #
-# Requirements:
-#   - Rust nightly toolchain with x86_64 target
-#   - nasm (Netwide Assembler)
-#   - qemu-system-x86_64
-#   - grub-mkrescue (for ISO)
-#   - xorriso (for ISO)
-#   - ld.lld (LLVM linker, usually bundled with Rust)
+# LAWS: Nothing is Hidden (all targets documented)
+#       Nothing is a Magic Incantation (every step explicit)
+# =============================================================================
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Configuration
-# ---------------------------------------------------------------------------
-
-# Target architecture
+# -----------------------------------------------------------------------------
 ARCH := x86_64
-TARGET := x86_64-nerdos
+TARGET := $(ARCH)-unknown-none
+KERNEL_NAME := boundaryos
 
-# Directories
-SRC_DIR := src
-KERNEL_DIR := $(SRC_DIR)/kernel_core
-BUILD_DIR := build
-ISO_DIR := $(BUILD_DIR)/iso
-GRUB_DIR := $(ISO_DIR)/boot/grub
+# Paths
+BOOT_DIR := boot
+KERNEL_DIR := kernel/src
+BUILD_DIR := target/$(TARGET)/debug
+ISO_DIR := isodir
 
-# Output files
-KERNEL_BIN := $(BUILD_DIR)/nerdos.bin
-KERNEL_ISO := $(BUILD_DIR)/nerdos.iso
-BOOT_ASM := $(SRC_DIR)/bootloader/src/boot.asm
-LINKER_SCRIPT := $(SRC_DIR)/bootloader/linker.ld
-
-# Rust toolchain
-CARGO := cargo
+# Tools
 RUSTC := rustc
-LD := ld.lld
-NASM := nasm
+CARGO := cargo
+AS := nasm
+LD := rust-lld
+GRUB := grub-mkrescue
 QEMU := qemu-system-x86_64
 GDB := gdb
 
-# Build profile (dev or release)
-PROFILE := release
-ifeq ($(PROFILE),release)
-    CARGO_PROFILE := --release
-    RUSTFLAGS := -C link-arg=-T$(LINKER_SCRIPT) -C code-model=kernel -C relocation-model=static
-else
-    CARGO_PROFILE :=
-    RUSTFLAGS := -C link-arg=-T$(LINKER_SCRIPT) -C code-model=kernel -C relocation-model=static
-endif
+# QEMU Flags
+QEMU_FLAGS := -m 2G \
+              -cpu qemu64 \
+              -drive format=raw,file=$(ISO_DIR)/boundaryos.iso \
+              -boot d \
+              -serial stdio \
+              -no-reboot \
+              -no-shutdown
 
-# QEMU arguments
-QEMU_MEMORY := 512M
-QEMU_CPUS := 2
-QEMU_ARGS := -m $(QEMU_MEMORY) -smp $(QEMU_CPUS) -serial stdio \
-    -cpu qemu64,+x2apic,+fsgsbase \
-    -no-reboot -no-shutdown \
-    -device isa-debug-exit,iobase=0xf4,iosize=0x04
+# Debug QEMU Flags
+QEMU_DEBUG_FLAGS := $(QEMU_FLAGS) \
+                    -s \
+                    -S
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Phony Targets
+# -----------------------------------------------------------------------------
+.PHONY: all build run debug iso clean help phases test disasm size
+
+# -----------------------------------------------------------------------------
 # Default Target
-# ---------------------------------------------------------------------------
-
-.PHONY: all build run iso clean debug format lint help
-
+# -----------------------------------------------------------------------------
 all: build
 
-# ---------------------------------------------------------------------------
-# Build Targets
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Build Kernel
+# -----------------------------------------------------------------------------
+build:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Building BoundaryOS Kernel            ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(CARGO) build --target $(TARGET)
+@echo ""
+@echo "[+] Build complete: $(BUILD_DIR)/$(KERNEL_NAME)"
 
-# Build the kernel binary from Rust code + assembly stub
-build: $(KERNEL_BIN)
+# -----------------------------------------------------------------------------
+# Run in QEMU
+# -----------------------------------------------------------------------------
+run: iso
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║     Launching BoundaryOS in QEMU             ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(QEMU) $(QEMU_FLAGS)
 
-# Link everything together into the final kernel binary
-$(KERNEL_BIN): boot_object kernel_object
-	@echo "[LINK] $(KERNEL_BIN)"
-	@mkdir -p $(BUILD_DIR)
-	$(LD) -n -T $(LINKER_SCRIPT) -o $@ \
-		$(BUILD_DIR)/boot.o \
-		$(BUILD_DIR)/libkernel_core.a \
-		--gc-sections
-	@echo "[SIZE] $$(ls -lh $@ | awk '{print $$5}')"
+# -----------------------------------------------------------------------------
+# Run with GDB Debugging
+# -----------------------------------------------------------------------------
+debug: iso
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║  Starting QEMU with GDB server (port 1234)   ║"
+@echo "║  In another terminal: gdb -ex 'target remote :1234'  ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(QEMU) $(QEMU_DEBUG_FLAGS)
 
-# Assemble the boot stub (Multiboot2 header + entry point)
-boot_object: $(BOOT_ASM)
-	@echo "[NASM] $(BOOT_ASM)"
-	@mkdir -p $(BUILD_DIR)
-	$(NASM) -f elf64 -o $(BUILD_DIR)/boot.o $(BOOT_ASM)
+# -----------------------------------------------------------------------------
+# Create Bootable ISO
+# -----------------------------------------------------------------------------
+iso: build
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Creating Bootable ISO                 ║"
+@echo "╚══════════════════════════════════════════════╝"
+mkdir -p $(ISO_DIR)/boot/grub
+cp $(BUILD_DIR)/$(KERNEL_NAME) $(ISO_DIR)/boot/$(KERNEL_NAME)
+cp $(BOOT_DIR)/grub.cfg $(ISO_DIR)/boot/grub/
+$(GRUB) -o $(ISO_DIR)/boundaryos.iso $(ISO_DIR)
+@echo ""
+@echo "[+] ISO created: $(ISO_DIR)/boundaryos.iso"
 
-# Build kernel Rust code as a static library
-kernel_object:
-	@echo "[CARGO] Building kernel_core (profile: $(PROFILE))"
-	RUSTFLAGS="$(RUSTFLAGS)" $(CARGO) build $(CARGO_PROFILE) -p kernel_core
-	@mkdir -p $(BUILD_DIR)
-	@cp target/$(if $(filter release,$(PROFILE)),release,debug)/libkernel_core.a \
-		$(BUILD_DIR)/libkernel_core.a
-
-# ---------------------------------------------------------------------------
-# ISO Target
-# ---------------------------------------------------------------------------
-
-# Create a bootable ISO using GRUB2
-iso: $(KERNEL_ISO)
-
-$(KERNEL_ISO): $(KERNEL_BIN) grub_cfg
-	@echo "[ISO] Building bootable ISO..."
-	@mkdir -p $(GRUB_DIR)
-	@cp $(KERNEL_BIN) $(ISO_DIR)/boot/nerdos.bin
-	@cp boot/grub/grub.cfg $(GRUB_DIR)/grub.cfg
-	@grub-mkrescue -o $@ $(ISO_DIR) 2>/dev/null || \
-		echo "[WARN] grub-mkrescue not available, using xorriso fallback..."
-	@echo "[DONE] ISO created: $@"
-
-# Copy GRUB config
-grub_cfg: boot/grub/grub.cfg
-	@echo "[GRUB] Using GRUB configuration"
-
-# ---------------------------------------------------------------------------
-# QEMU Targets
-# ---------------------------------------------------------------------------
-
-# Run NerdOS in QEMU (BIOS mode)
-run: build
-	@echo "[QEMU] Starting NerdOS (BIOS mode)..."
-	$(QEMU) $(QEMU_ARGS) -kernel $(KERNEL_BIN)
-
-# Run NerdOS in QEMU (UEFI mode)
-run-uefi: iso
-	@echo "[QEMU] Starting NerdOS (UEFI mode)..."
-	$(QEMU) $(QEMU_ARGS) -cdrom $(KERNEL_ISO) -bios /usr/share/ovmf/OVMF.fd
-
-# Run NerdOS with KVM acceleration (Linux only)
-run-kvm: build
-	@echo "[QEMU] Starting NerdOS (KVM accelerated)..."
-	$(QEMU) $(QEMU_ARGS) -enable-kvm -kernel $(KERNEL_BIN)
-
-# ---------------------------------------------------------------------------
-# Debug Targets
-# ---------------------------------------------------------------------------
-
-# Run QEMU with GDB server (port 1234)
-debug: build
-	@echo "[QEMU] Starting with GDB server on :1234"
-	@echo "[GDB]  In another terminal, run: make gdb"
-	$(QEMU) $(QEMU_ARGS) -kernel $(KERNEL_BIN) -s -S
-
-# Connect GDB to QEMU
-gdb:
-	$(GDB) -ex "target remote :1234" \
-		-ex "symbol-file $(KERNEL_BIN)" \
-		-ex "break kernel_main" \
-		-ex "continue"
-
-# ---------------------------------------------------------------------------
-# Utility Targets
-# ---------------------------------------------------------------------------
-
-# Format all Rust code
-format:
-	@echo "[FMT] Formatting Rust code..."
-	$(CARGO) fmt --all
-
-# Run clippy linter on all crates
-lint:
-	@echo "[LINT] Running clippy..."
-	$(CARGO) clippy --all -- -D warnings \
-		-W clippy::pedantic \
-		-W clippy::nursery \
-		-A clippy::missing_errors_doc \
-		-A clippy::missing_panics_doc
-
-# Run tests (for host-target code)
-test:
-	@echo "[TEST] Running tests..."
-	$(CARGO) test --all
-
-# Clean build artifacts
+# -----------------------------------------------------------------------------
+# Clean Build Artifacts
+# -----------------------------------------------------------------------------
 clean:
-	@echo "[CLEAN] Removing build artifacts..."
-	$(CARGO) clean
-	@rm -rf $(BUILD_DIR)
-	@rm -f $(ISO_DIR)/boot/nerdos.bin
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Cleaning Build Artifacts              ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(CARGO) clean
+rm -rf $(ISO_DIR)
+@echo "[+] Clean complete"
 
-# Install dependencies (Ubuntu/Debian)
-deps:
-	@echo "[DEPS] Installing build dependencies..."
-	sudo apt-get update
-	sudo apt-get install -y \
-		nasm qemu-system-x86 \
-		grub-common grub-pc-bin xorriso \
-		ovmf gdb
-	rustup target add x86_64-unknown-none
+# -----------------------------------------------------------------------------
+# Disassemble Kernel
+# -----------------------------------------------------------------------------
+disasm: build
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Disassembling Kernel                  ║"
+@echo "╚══════════════════════════════════════════════╝"
+objdump -d $(BUILD_DIR)/$(KERNEL_NAME) | less
 
-# Install Rust nightly toolchain
-rust-toolchain:
-	@echo "[RUST] Installing nightly toolchain..."
-	rustup install nightly
-	rustup default nightly
-	rustup component add rust-src
-	rustup target add x86_64-unknown-none
+# -----------------------------------------------------------------------------
+# Show Binary Size
+# -----------------------------------------------------------------------------
+size: build
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Kernel Size Analysis                  ║"
+@echo "╚══════════════════════════════════════════════╝"
+@echo ""
+@echo "Section sizes:"
+size $(BUILD_DIR)/$(KERNEL_NAME)
+@echo ""
+@echo "Total binary size:"
+ls -lh $(BUILD_DIR)/$(KERNEL_NAME) | awk '{print $$5}'
+@echo ""
+@echo "Budget: < 100KB total | Target: 100k lines"
 
-# ---------------------------------------------------------------------------
-# Help
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Run Tests
+# -----------------------------------------------------------------------------
+test:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Running Kernel Tests                  ║"
+@echo "╚══════════════════════════════════════════════╝"
+$(CARGO) test --target $(TARGET)
 
+# -----------------------------------------------------------------------------
+# Phase Execution (for phase.md workflow)
+# -----------------------------------------------------------------------------
+phase%: 
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║        Executing Phase $*                     ║"
+@echo "╚══════════════════════════════════════════════╝"
+@echo "[*] Phase $* execution placeholder"
+@echo "[*] Add phase-specific commands here"
+@echo ""
+@echo "[+] Phase $* complete"
+
+# -----------------------------------------------------------------------------
+# Install Toolchain Components
+# -----------------------------------------------------------------------------
+install-toolchain:
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║     Installing Required Toolchain            ║"
+@echo "╚══════════════════════════════════════════════╝"
+rustup component add rust-src llvm-tools-preview
+rustup target add $(TARGET)
+@echo ""
+@echo "[+] Toolchain installation complete"
+
+# -----------------------------------------------------------------------------
+# Help Target
+# -----------------------------------------------------------------------------
 help:
-	@echo "NerdOS Build System"
-	@echo ""
-	@echo "Targets:"
-	@echo "  make build      - Build the kernel binary"
-	@echo "  make run        - Run NerdOS in QEMU (BIOS)"
-	@echo "  make run-uefi   - Run NerdOS in QEMU (UEFI)"
-	@echo "  make run-kvm    - Run NerdOS with KVM acceleration"
-	@echo "  make iso        - Build bootable ISO image"
-	@echo "  make debug      - Run QEMU with GDB server"
-	@echo "  make gdb        - Connect GDB to running QEMU"
-	@echo "  make clean      - Remove build artifacts"
-	@echo "  make format     - Format Rust code"
-	@echo "  make lint       - Run clippy linter"
-	@echo "  make test       - Run tests"
-	@echo "  make deps       - Install build dependencies"
-	@echo "  make help       - Show this help"
-	@echo ""
-	@echo "Variables:"
-	@echo "  PROFILE=release - Build optimized binary (default)"
-	@echo "  PROFILE=dev     - Build debug binary"
+@echo "╔══════════════════════════════════════════════╗"
+@echo "║           BoundaryOS Makefile Help           ║"
+@echo "╚══════════════════════════════════════════════╝"
+@echo ""
+@echo "Available targets:"
+@echo "  all          - Build the kernel (default)"
+@echo "  build        - Compile kernel with Cargo"
+@echo "  run          - Build and run in QEMU"
+@echo "  debug        - Run in QEMU with GDB server"
+@echo "  iso          - Create bootable ISO image"
+@echo "  clean        - Remove build artifacts"
+@echo "  disasm       - Disassemble kernel binary"
+@echo "  size         - Show binary size analysis"
+@echo "  test         - Run kernel tests"
+@echo "  phaseN       - Execute phase N (e.g., make phase1)"
+@echo "  install-toolchain - Install required Rust components"
+@echo "  help         - Show this help message"
+@echo ""
+@echo "Examples:"
+@echo "  make build           # Build only"
+@echo "  make run             # Build and run in QEMU"
+@echo "  make debug           # Start GDB debugging session"
+@echo "  make phase5          # Execute phase 5"
+@echo "  make clean && make   # Clean rebuild"
+@echo ""
+
+# =============================================================================
+# MODULE SIZE: ~0.2k lines | budget: Mk lines of Tk total
+# =============================================================================
